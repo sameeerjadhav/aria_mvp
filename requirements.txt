@@ -6,13 +6,10 @@ cachetools==5.5.2
 certifi==2025.8.3
 charset-normalizer==3.4.2
 click==8.2.1
-colorama @ file:///home/conda/feedstock_root/build_artifacts/colorama_1733218098505/work
 faiss==1.7.4
-filelock @ file:///home/conda/feedstock_root/build_artifacts/filelock_1741969488311/work
 fsspec==2025.7.0
 gitdb==4.0.12
 GitPython==3.1.45
-gmpy2 @ file:///Users/runner/miniforge3/conda-bld/gmpy2_1745509409286/work
 google-ai-generativelanguage==0.6.15
 google-api-core==2.25.1
 google-api-python-client==2.178.0
@@ -26,17 +23,10 @@ hf-xet==1.1.7
 httplib2==0.22.0
 huggingface-hub==0.34.3
 idna==3.10
-Jinja2 @ file:///home/conda/feedstock_root/build_artifacts/jinja2_1741263328855/work
-joblib @ file:///home/conda/feedstock_root/build_artifacts/joblib_1748019130050/work
 jsonschema==4.25.0
 jsonschema-specifications==2025.4.1
-MarkupSafe @ file:///Users/runner/miniforge3/conda-bld/markupsafe_1733219670088/work
-mpmath @ file:///home/conda/feedstock_root/build_artifacts/mpmath_1733302684489/work
 narwhals==2.0.1
-networkx @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_networkx_1731521053/work
-numpy @ file:///Users/runner/miniforge3/conda-bld/numpy_1707225538192/work/dist/numpy-1.26.4-cp310-cp310-macosx_10_9_x86_64.whl#sha256=d544e550b9582a12a12839ddf251b97a80a022b3d4c11cede2fb4bd206b16856
 packaging==25.0
-pandas @ file:///Users/runner/miniforge3/conda-bld/pandas_1752081782435/work
 pillow==11.3.0
 proto-plus==1.26.1
 protobuf==5.29.5
@@ -47,32 +37,23 @@ pydantic==2.11.7
 pydantic_core==2.33.2
 pydeck==0.9.1
 pyparsing==3.2.3
-python-dateutil @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_python-dateutil_1751104122/work
-pytz @ file:///home/conda/feedstock_root/build_artifacts/pytz_1742920838005/work
-PyYAML @ file:///Users/runner/miniforge3/conda-bld/pyyaml_1737454722142/work
 referencing==0.36.2
 regex==2025.7.34
 requests==2.32.4
 rpds-py==0.26.0
 rsa==4.9.1
 safetensors==0.4.5
-scikit-learn @ file:///Users/runner/miniforge3/conda-bld/scikit-learn_1752825772370/work/dist/scikit_learn-1.7.1-cp310-cp310-macosx_10_13_x86_64.whl#sha256=1df73d1f763546fdb88ef71739ec6ca0857d96c2a17d43a9bd0e4aaf0ff60998
-scipy @ file:///Users/runner/miniforge3/conda-bld/scipy-split_1739790744051/work/dist/scipy-1.15.2-cp310-cp310-macosx_10_13_x86_64.whl#sha256=f6d40aea21a34e9d9a143f479557cad14bca2f4dbd51ceb15ddc40e976676acb
 sentence-transformers==3.0.1
-six @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_six_1753199211/work
 smmap==5.0.2
 streamlit==1.48.0
-sympy @ file:///home/conda/feedstock_root/build_artifacts/sympy_1745946051654/work
+
 tenacity==9.1.2
-threadpoolctl @ file:///home/conda/feedstock_root/build_artifacts/threadpoolctl_1741878222898/work
+
 tokenizers==0.19.1
 toml==0.10.2
 torch==2.2.2
 tornado==6.5.1
-tqdm @ file:///home/conda/feedstock_root/build_artifacts/tqdm_1735661334605/work
 transformers==4.43.3
 typing-inspection==0.4.1
-typing_extensions @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_typing_extensions_1751643513/work
-tzdata @ file:///home/conda/feedstock_root/build_artifacts/python-tzdata_1742745135198/work
 uritemplate==4.2.0
 urllib3==2.5.0
