@@ -975,4 +975,4 @@ with tab3:
         st.info("Fill Tabs 1 & 2, then click **Compute Archetype & Style** to proceed.")
 
 st.divider()
-st.caption("© ARIA™ — MVP demo. Replace demo defaults with production schema as needed.")
+st.caption("© ARIA™ — MVP demo. All rights reserved.")
