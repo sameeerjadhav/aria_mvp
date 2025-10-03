@@ -149,26 +149,9 @@ seed_val = 42 #st.sidebar.number_input("Random seed (optional)", value=0, step=1
 # =============================
 DEFAULT_GEMINI_KEY = "AIzaSyCfxYh18uteX3PfzqdFCaaARIRHY8QJlsE"  # <-- put your real key here for the MVP
 
-st.sidebar.subheader("Gemini API Key")
-_g_key_prev = st.session_state.get("GEMINI_API_KEY", DEFAULT_GEMINI_KEY)
-_g_key_curr = st.sidebar.text_input(
-    "Key (stored in session)", value=_g_key_prev, type="password",
-    help="Hardcoded default shown because this is an MVP demo."
-)
-if _g_key_curr != _g_key_prev:
-    st.session_state["GEMINI_API_KEY"] = _g_key_curr
-    try:
-        st.cache_resource.clear()  # reinit cached model on key change
-    except Exception:
-        pass
 
 def get_gemini_key() -> str | None:
-    key = st.session_state.get("GEMINI_API_KEY")
-    if key:
-        return key
-    if DEFAULT_GEMINI_KEY:
-        return DEFAULT_GEMINI_KEY
-    return None
+    return DEFAULT_GEMINI_KEY
 
 @st.cache_resource(show_spinner=False)
 def init_gemini(api_key: str | None, model_name: str = "gemini-2.0-flash"):
@@ -414,102 +397,121 @@ tab1, tab2, tab3 = st.tabs(["1) User Demographics", "2) Questionnaire", "3) Reco
 
 # ---------- TAB 1: Demographics ----------
 # ---------- TAB 1: Demographics (3 partitions: Checks | Sliders | Other) ----------
+# ---------- TAB 1: Demographics ----------
 with tab1:
-    #st.subheader("User Demographics")
+    # Get existing demographics from session state for defaults
+    existing_demo = st.session_state.get("demographics", {})
 
-    col_other, col_checks, col_sliders = st.columns([1.0, 1.0, 1.0])
+    with st.form(key="demographics_form"):
+        col_other, col_checks, col_sliders = st.columns([1.0, 1.0, 1.0])
 
-    # ------------------ OTHER INPUTS PARTITION ------------------
-    with col_other:
-        st.markdown("### Core Profile & Context")
-        o1, o2 = st.columns(2)
-        name      = o1.text_input("Name", value="Steven Burton")
-        age       = o2.number_input("Age", min_value=16, max_value=99, value=19)
+        # ------------------ OTHER INPUTS PARTITION ------------------
+        with col_other:
+            st.markdown("### Core Profile & Context")
+            o1, o2 = st.columns(2)
+            name = o1.text_input("Name", value=existing_demo.get("Name", "Steven Burton"))
+            age = o2.number_input("Age", min_value=16, max_value=99, value=existing_demo.get("Age", 19))
 
-        gender    = st.selectbox("Gender", ["Male","Female","Non-binary","Prefer not to say"], index=0)
-        location  = st.text_input("Location", value="Dallas")
+            genders = ["Male","Female","Non-binary","Prefer not to say"]
+            gender_idx = genders.index(existing_demo.get("Gender", "Male")) if existing_demo.get("Gender") in genders else 0
+            gender = st.selectbox("Gender", genders, index=gender_idx)
+            location = st.text_input("Location", value=existing_demo.get("Location", "Dallas"))
 
-        st.markdown("---")
-        highly_educated = st.selectbox("Highest Education", ["High School","Associate","Bachelor's","Master's","PhD"], index=2)
-        dietary_pref    = st.selectbox("Dietary Preferences", ["None","Vegan","Vegetarian","Pescatarian","Keto","Paleo","Halal","Kosher"], index=1)
-        pref_channel    = st.selectbox("Preferred Shopping Channel", ["Online","In-store","Omnichannel"], index=0)
+            st.markdown("---")
+            edu_opts = ["High School","Associate","Bachelor's","Master's","PhD"]
+            edu_idx = edu_opts.index(existing_demo.get("Highly_Educated", "Bachelor's")) if existing_demo.get("Highly_Educated") in edu_opts else 2
+            highly_educated = st.selectbox("Highest Education", edu_opts, index=edu_idx)
+            
+            diet_opts = ["None","Vegan","Vegetarian","Pescatarian","Keto","Paleo","Halal","Kosher"]
+            diet_idx = diet_opts.index(existing_demo.get("Dietary_Preferences", "Vegan")) if existing_demo.get("Dietary_Preferences") in diet_opts else 1
+            dietary_pref = st.selectbox("Dietary Preferences", diet_opts, index=diet_idx)
+            
+            channel_opts = ["Online","In-store","Omnichannel"]
+            channel_idx = channel_opts.index(existing_demo.get("Preferred_Shopping_Channel", "Online")) if existing_demo.get("Preferred_Shopping_Channel") in channel_opts else 0
+            pref_channel = st.selectbox("Preferred Shopping Channel", channel_opts, index=channel_idx)
 
-        hobbies   = st.text_input("Hobbies & Interests", value="Fitness")
-        affluent  = st.number_input("Affluent (annual income)", value=141924, step=1000)
+            hobbies = st.text_input("Hobbies & Interests", value=existing_demo.get("Hobbies_Interests", "Fitness"))
+            affluent = st.number_input("Affluent (annual income)", value=existing_demo.get("Affluent", 141924), step=1000)
 
+        # ------------------ CHECKBOX PARTITION ------------------
+        with col_checks:
+            st.markdown("### Life Stage & Affiliation")
+            cb1, cb2 = st.columns(2)
 
-    # ------------------ CHECKBOX PARTITION ------------------
-    with col_checks:
-        st.markdown("### Life Stage & Affiliation")
-        cb1, cb2 = st.columns(2)
+            millennial_women = cb1.checkbox("Millennial Women", value=bool(existing_demo.get("Millennial_Women", False)))
+            modern_mom = cb2.checkbox("Modern Mom", value=bool(existing_demo.get("Modern_Mom", False)))
+            gen_z = cb1.checkbox("Gen Z", value=bool(existing_demo.get("Gen_Z", True)))
+            entrepreneur = cb2.checkbox("Entrepreneur", value=bool(existing_demo.get("Entrepreneur", True)))
+            intrepreneur = cb1.checkbox("Intrepreneur", value=bool(existing_demo.get("Intrepreneur", False)))
+            early_adopter = cb2.checkbox("Early Adopter", value=bool(existing_demo.get("Early_Adopter", True)))
+            well_traveled = cb1.checkbox("Well Traveled", value=bool(existing_demo.get("Well_Traveled", True)))
+            social_online = cb2.checkbox("Socially Active Online", value=bool(existing_demo.get("Socially_Active_Online", True)))
+            foodie = cb1.checkbox("Self-Proclaimed Foodie", value=bool(existing_demo.get("Self_Proclaimed_Foodie", True)))
+            urban_families = cb2.checkbox("Urban Families", value=bool(existing_demo.get("Urban_Families", True)))
+            dinks = cb1.checkbox("DINKS", value=bool(existing_demo.get("DINKS", False)))
+            empty_nesters = cb2.checkbox("Empty Nesters", value=bool(existing_demo.get("Empty_Nesters", False)))
+            emerging_adults = cb1.checkbox("Emerging Adults", value=bool(existing_demo.get("Emerging_Adults", True)))
 
-        millennial_women = cb1.checkbox("Millennial Women", value=False)
-        modern_mom       = cb2.checkbox("Modern Mom", value=False)
-        gen_z            = cb1.checkbox("Gen Z", value=True)
-        entrepreneur     = cb2.checkbox("Entrepreneur", value=True)
-        intrepreneur     = cb1.checkbox("Intrepreneur", value=False)
-        early_adopter    = cb2.checkbox("Early Adopter", value=True)
-        well_traveled    = cb1.checkbox("Well Traveled", value=True)
-        social_online    = cb2.checkbox("Socially Active Online", value=True)
-        foodie           = cb1.checkbox("Self-Proclaimed Foodie", value=True)
-        urban_families   = cb2.checkbox("Urban Families", value=True)
-        dinks            = cb1.checkbox("DINKS", value=False)
-        empty_nesters    = cb2.checkbox("Empty Nesters", value=False)
-        emerging_adults  = cb1.checkbox("Emerging Adults", value=True)
+        # ------------------ SLIDER PARTITION ------------------
+        with col_sliders:
+            st.markdown("### Preference & Behavior Scales")
+            globally_intuitive = st.slider("Globally Intuitive (0–10)", 0, 10, existing_demo.get("Globally_Intuitive", 10))
+            moving_doing = st.slider("Moving & Doing Constantly (0–10)", 0, 10, existing_demo.get("Moving_Doing_Constantly", 8))
+            social_offline = st.slider("Socially Active Offline (0–10)", 0, 10, existing_demo.get("Socially_Active_Offline", 9))
+            experience_driven = st.slider("Experience Driven (0–10)", 0, 10, existing_demo.get("Experience_Driven", 1))
+            quality_conscious = st.slider("Quality Conscious (0–10)", 0, 10, existing_demo.get("Quality_Conscious", 3))
+            tech_savvy = st.slider("Tech Savvy (0–10)", 0, 10, existing_demo.get("Tech_Savvy", 6))
+            shopping_freq = st.slider("Shopping Frequency (0–10)", 0, 10, existing_demo.get("Shopping_Frequency", 10))
+            brand_loyalty = st.slider("Brand Loyalty (0.0–1.0)", 0.0, 1.0, float(existing_demo.get("Brand_Loyalty", 0.65)))
+            env_conscious = st.slider("Environmental Consciousness (0–10)", 0, 10, existing_demo.get("Environmental_Consciousness", 0))
+            social_resp = st.slider("Social Responsibility Awareness (0–10)", 0, 10, existing_demo.get("Social_Responsibility_Awareness", 8))
+            innovation_seeking = st.slider("Innovation & Novelty Seeking (0–10)", 0, 10, existing_demo.get("Innovation_Novelty_Seeking", 8))
+            personalization = st.slider("Personalization Preference (0–10)", 0, 10, existing_demo.get("Personalization_Preference", 10))
 
-    # ------------------ SLIDER PARTITION ------------------
-    with col_sliders:
-        st.markdown("### Preference & Behavior Scales")
-        globally_intuitive   = st.slider("Globally Intuitive (0–10)", 0, 10, 10)
-        moving_doing         = st.slider("Moving & Doing Constantly (0–10)", 0, 10, 8)
-        social_offline       = st.slider("Socially Active Offline (0–10)", 0, 10, 9)
-        experience_driven    = st.slider("Experience Driven (0–10)", 0, 10, 1)
-        quality_conscious    = st.slider("Quality Conscious (0–10)", 0, 10, 3)
-        tech_savvy           = st.slider("Tech Savvy (0–10)", 0, 10, 6)
-        shopping_freq        = st.slider("Shopping Frequency (0–10)", 0, 10, 10)
-        brand_loyalty        = st.slider("Brand Loyalty (0.0–1.0)", 0.0, 1.0, 0.65)
-        env_conscious        = st.slider("Environmental Consciousness (0–10)", 0, 10, 0)
-        social_resp          = st.slider("Social Responsibility Awareness (0–10)", 0, 10, 8)
-        innovation_seeking   = st.slider("Innovation & Novelty Seeking (0–10)", 0, 10, 8)
-        personalization      = st.slider("Personalization Preference (0–10)", 0, 10, 10)
-
+        # Form submit button
+        submitted = st.form_submit_button("Save Demographics", type="primary", use_container_width=True)
     
-    # Persist to session
-    st.session_state["demographics"] = {
-        "Name": name, "Age": age, "Gender": gender, "Location": location,
-        "Millennial_Women": int(millennial_women),
-        "Modern_Mom": int(modern_mom),
-        "Gen_Z": int(gen_z),
-        "Entrepreneur": int(entrepreneur),
-        "Intrepreneur": int(intrepreneur),
-        "Early_Adopter": int(early_adopter),
-        "Well_Traveled": int(well_traveled),
-        "Globally_Intuitive": globally_intuitive,
-        "Highly_Educated": highly_educated,
-        "Moving_Doing_Constantly": moving_doing,
-        "Socially_Active_Online": int(social_online),
-        "Socially_Active_Offline": social_offline,
-        "Self_Proclaimed_Foodie": int(foodie),
-        "Dietary_Preferences": dietary_pref,
-        "Experience_Driven": experience_driven,
-        "Quality_Conscious": quality_conscious,
-        "Tech_Savvy": tech_savvy,
-        "Hobbies_Interests": hobbies,
-        "Affluent": affluent,
-        "Urban_Families": int(urban_families),
-        "DINKS": int(dinks),
-        "Empty_Nesters": int(empty_nesters),
-        "Emerging_Adults": int(emerging_adults),
-        "Shopping_Frequency": shopping_freq,
-        "Preferred_Shopping_Channel": pref_channel,
-        "Brand_Loyalty": brand_loyalty,
-        "Environmental_Consciousness": env_conscious,
-        "Social_Responsibility_Awareness": social_resp,
-        "Innovation_Novelty_Seeking": innovation_seeking,
-        "Personalization_Preference": personalization,
-    }
-
-
+    # Only update session state when form is submitted
+    if submitted:
+        st.session_state["demographics"] = {
+            "Name": name, "Age": age, "Gender": gender, "Location": location,
+            "Millennial_Women": int(millennial_women),
+            "Modern_Mom": int(modern_mom),
+            "Gen_Z": int(gen_z),
+            "Entrepreneur": int(entrepreneur),
+            "Intrepreneur": int(intrepreneur),
+            "Early_Adopter": int(early_adopter),
+            "Well_Traveled": int(well_traveled),
+            "Globally_Intuitive": globally_intuitive,
+            "Highly_Educated": highly_educated,
+            "Moving_Doing_Constantly": moving_doing,
+            "Socially_Active_Online": int(social_online),
+            "Socially_Active_Offline": social_offline,
+            "Self_Proclaimed_Foodie": int(foodie),
+            "Dietary_Preferences": dietary_pref,
+            "Experience_Driven": experience_driven,
+            "Quality_Conscious": quality_conscious,
+            "Tech_Savvy": tech_savvy,
+            "Hobbies_Interests": hobbies,
+            "Affluent": affluent,
+            "Urban_Families": int(urban_families),
+            "DINKS": int(dinks),
+            "Empty_Nesters": int(empty_nesters),
+            "Emerging_Adults": int(emerging_adults),
+            "Shopping_Frequency": shopping_freq,
+            "Preferred_Shopping_Channel": pref_channel,
+            "Brand_Loyalty": brand_loyalty,
+            "Environmental_Consciousness": env_conscious,
+            "Social_Responsibility_Awareness": social_resp,
+            "Innovation_Novelty_Seeking": innovation_seeking,
+            "Personalization_Preference": personalization,
+        }
+        st.success("Demographics saved successfully!")
+    
+    # Show current saved data
+    if "demographics" in st.session_state:
+        with st.expander("View Saved Demographics"):
+            st.json(st.session_state["demographics"])
 # ---------- TAB 2: Questionnaire ----------
 # ---------- TAB 2: Questionnaire (33 questions, full text + options) ----------
 with tab2:
