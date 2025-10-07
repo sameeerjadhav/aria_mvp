@@ -446,7 +446,7 @@ def _strip_repeated_title(title: str, story: str, min_overlap: float = 0.6) -> s
     return story
 
 # ---------- Strict few-shot prompt + validated retry loop (used by generate_storyline) ----------
-def _validate_story(story_text: str, first_ing: str, cadenza: str, max_words: int = 50):
+def _validate_story(story_text: str, first_ing: str, cadenza: str, max_words: int = 100):
     sents = SENT_RE.findall(story_text)
     if len(sents) != 2:
         return False, "sentence_count"
@@ -475,7 +475,7 @@ def generate_storyline(model, title, ing, tradition, moda, prosody, cadenza, fee
     Improved pipeline:
     1) Build strict few-shot prompt (existing FEW_SHOT_EXAMPLES).
     2) Request up to `n_candidates` outputs (via repeated calls).
-    3) Validate basic constraints (2 sentences, <=50 words, first ingredient anchor).
+    3) Validate basic constraints (2 sentences, <=100 words, first ingredient anchor).
     4) Score candidates by presence of archetype lexicon, moda ambience, cadenza keywords, and prosody rhythm heuristics.
     5) Return top-scoring candidate or deterministic fallback.
     """
@@ -490,19 +490,37 @@ def generate_storyline(model, title, ing, tradition, moda, prosody, cadenza, fee
     )
     # escape JSON braces in template
     prompt_template = (
-        "You are a Ricettario narrator. RETURN JSON ONLY: {{\"story\":\"<two sentences>\"}}.\n\n"
-        "STRICT CONSTRAINTS (machine-verify):\n"
-        "1) EXACTLY two sentences.\n"
-        "2) <= 50 words total.\n"
-        "3) Must include the first listed ingredient token (singular or plural).\n"
-        "4) Do not repeat the recipe title verbatim as a heading.\n"
-        "5) Use Prosody (shape rhythm) and Cadenza (shape closure) as style constraints.\n\n"
-        "FEW-SHOT EXEMPLARS (follow these patterns exactly):\n\n"
-        "{few_shot_block}\n\n"
-        "NOW GENERATE for the Input below.\n\n"
-        "Input: Title: {title} | Ingredients: {ing} | Moda: {moda} | Prosody: {prosody} | Cadenza: {cadenza} | Archetype: {archetype}\n\n"
-        "OUTPUT (JSON): {{\"story\": \"<two sentences>\"}}"
+    "You are a Ricettario narrator. RETURN JSON ONLY: {{\"story\":\"<two sentences>\"}}.\n\n"
+    "STRICT CONSTRAINTS (machine-verifiable):\n"
+    "1) EXACTLY two sentences, <= 100 words total.\n"
+    "2) Must include the first listed ingredient (singular or plural) as an anchor.\n"
+    "3) Do NOT repeat or restate the recipe title.\n"
+    "4) Each output must sound sensory and symbolic, not literal or descriptive.\n"
+    "5) Follow rhythm and closure:\n"
+    "   • Prosody shapes rhythm (e.g., Scherzando = playful leaps, Maestoso = grand cadence, Rubato = elastic phrasing).\n"
+    "   • Cadenza shapes closure (e.g., Crescendo = rising finish, Sfumato = fading end, Maestoso = declarative close).\n"
+    "6) Ensure narrative closure that matches Cadenza type — stories must resolve, not just stop.\n"
+    "7) Archetype tone must guide imagery (e.g., Oracle = prophetic, Alchemist = transmutational, Builder = grounded creation).\n"
+    "8) Never use menu-style phrasing like 'this dish' or 'the result'.\n\n"
+    "STYLE GUIDE:\n"
+    "- Write like a cinematic narrator evoking motion, color, and transformation.\n"
+    "- Use symbolic sensory anchors (fog, brass, honey, dusk, salt, shadow).\n"
+    "- Avoid redundancy, overuse of adjectives, or factual enumeration.\n\n"
+    "- Each sentence should have internal musical rhythm (balanced clauses, not fragments). Each story must feel complete.\n"
+
+    "FEW-SHOT EXEMPLARS (imitate structure and rhythm):\n\n"
+    "{few_shot_block}\n\n"
+    "NOW GENERATE for the Input below.\n\n"
+    "Input:\n"
+    "Title: {title}\n"
+    "Ingredients: {ing}\n"
+    "Moda: {moda}\n"
+    "Prosody: {prosody}\n"
+    "Cadenza: {cadenza}\n"
+    "Archetype: {archetype}\n\n"
+    "OUTPUT (JSON): {{\"story\": \"<two sentences>\"}}"
     )
+
 
     prompt = prompt_template.format(
         few_shot_block=few_shot_block,
@@ -514,7 +532,7 @@ def generate_storyline(model, title, ing, tradition, moda, prosody, cadenza, fee
         archetype=archetype
     )
 
-    def basic_validate(story_text: str, max_words: int = 50):
+    def basic_validate(story_text: str, max_words: int = 100):
         sents = SENT_RE.findall(story_text)
         if len(sents) != 2:
             return False, "sentence_count"
