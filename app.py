@@ -1,8 +1,8 @@
 # app.py
-
 # ===============================================================
 # ARIA™ — 3-tab MVP: Demographics | Questionnaire | Recommendations
-# Prosody/Cadenza fixed per user • Rule-based Moda • Gemini fallback
+# Few-shot prompting, strict JSON schema, validation, deterministic
+# prosody/cadenza enforcement, archetype lexicons, and fallback.
 # ===============================================================
 
 import os, sys, re, json, ast, time, random, logging
@@ -12,17 +12,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-# --- Torch debug (helps ensure correct interpreter/versions) ---
-# try:
-#     import torch
-#     st.sidebar.write("Python:", sys.executable)
-#     st.sidebar.write("Torch:", torch.__version__)
-#     st.sidebar.write("Torch path:", getattr(torch, "__file__", ""))
-#     st.sidebar.write("Has torch.uint64:", hasattr(torch, "uint64"))
-# except Exception as e:
-#     st.sidebar.warning(f"Torch not available: {e}")
-
-# --- FAISS (optional; falls back to NumPy if unavailable) -----
+# Optional libs
 try:
     import faiss  # type: ignore
     HAVE_FAISS = True
@@ -44,10 +34,8 @@ ING_COL_DESIRED     = "ingredients"
 EMB_MODEL_ID        = "all-MiniLM-L6-v2"
 TOP_N_RECS_DEFAULT  = 3
 
-# >>> DATASET: load from project path (no uploader)
-RECIPES_PATH = DEFAULT_RECIPES_CSV  # <-- set to your CSV path in the project folder
+RECIPES_PATH = DEFAULT_RECIPES_CSV
 
-# Archetype seed text (embedding targets)
 ARCHETYPE_TEXT = {
     "Alchemist":"Experimental curious process driven ferments reductions rare techniques",
     "Curator":"Tasteful discerning minimalist design conscious elegant selected iconic brands",
@@ -63,7 +51,6 @@ ARCHETYPE_TEXT = {
 }
 ARCHES = list(ARCHETYPE_TEXT.keys())
 
-# Ingredient → Moda rules
 MODA_RULES = {
     "Nocturne": ["custard","burnt","honey","lavender","rose","chamomile","earl grey","smoked"],
     "Virtuoso": ["mille-feuille","layer","ganache","truffle","pistachio","macaron","soufflé"],
@@ -71,7 +58,6 @@ MODA_RULES = {
     "Tableau":  ["citrus","lemon","lime","yuzu","orange","berry","pomegranate","basil","mint","matcha","salad","fritter","crudités","tartare"],
 }
 
-# Internal ARIA archetype → Persona rows for prosody/cadenza
 ARCHETYPE_TO_PERSONA = {
     "Alchemist": "The Alchemist",
     "Curator":   "The Builder",
@@ -86,7 +72,6 @@ ARCHETYPE_TO_PERSONA = {
     "Sentinel":  "The Guardian",
 }
 
-# Prosody/Cadenza table
 PROSODY_CADENZA = {
     "The Alchemist": {"primary_prosody":"Rubato","secondary_prosody":"Cantabile","primary_cadenza":"Crescendo","secondary_cadenza":"Sfumato","feel":"Improvisational, poetic build toward mystic revelation."},
     "The Strategist":{"primary_prosody":"Staccato","secondary_prosody":"Maestoso","primary_cadenza":"Moderato","secondary_cadenza":"Maestoso","feel":"Precise, commanding delivery with formal pacing and clarity."},
@@ -129,26 +114,19 @@ CADENZA_STYLE_GUIDE = {
     "Adagio":"Close with tender, unhurried warmth."
 }
 
-# =========================
-# Streamlit page
-# =========================
+# -----------------------------
+# Streamlit page settings
+# -----------------------------
 st.set_page_config(page_title="ARIA™ MVP — 3-tab Demo", layout="wide")
 st.title("ARIA™ — Psychometric Recommender (MVP)")
-#st.caption("1) Demographics  •  2) Questionnaire  •  3) Recommendations")
 
-# Sidebar — app controls
 st.sidebar.header("App Settings")
 topk = st.sidebar.slider("Top-N recommendations", 1, 10, TOP_N_RECS_DEFAULT, 1)
-
-#prosody_mode = st.sidebar.selectbox("Prosody/Cadenza selection", ["primary","secondary","hybrid"], index=0)
 use_llm = st.sidebar.checkbox("Use Gemini for narratives", value=True)
-seed_val = 42 #st.sidebar.number_input("Random seed (optional)", value=0, step=1)
+seed_val = 42
 
-# =============================
-# DROP-IN: Gemini key + model
-# =============================
-DEFAULT_GEMINI_KEY = "AIzaSyCfxYh18uteX3PfzqdFCaaARIRHY8QJlsE"  # <-- put your real key here for the MVP
-
+# Gemini default key placeholder: set your key to enable LLM
+DEFAULT_GEMINI_KEY = "AIzaSyCfxYh18uteX3PfzqdFCaaARIRHY8QJlsE"
 
 def get_gemini_key() -> str | None:
     return DEFAULT_GEMINI_KEY
@@ -167,7 +145,6 @@ def init_gemini(api_key: str | None, model_name: str = "gemini-2.0-flash"):
 def init_gemini_noarg():
     return init_gemini(get_gemini_key())
 
-# Initialize model immediately after sidebar
 model = init_gemini_noarg() if use_llm else None
 if use_llm and model is None:
     st.warning("Gemini model could not be initialized. Using deterministic fallback narratives.")
@@ -198,10 +175,8 @@ def parse_ing(cell: str) -> str:
 
 @st.cache_data(show_spinner=True)
 def load_recipes_df_from_path(path: str) -> pd.DataFrame:
-    # Try to read the project CSV; fallback to a tiny demo dataset
     try:
         df = pd.read_csv(path)
-        #st.sidebar.success(f"Loaded recipes from: {os.path.abspath(path)}")
     except Exception as e:
         st.sidebar.warning(f"Could not read '{path}' ({e}). Using demo recipes.")
         data = [
@@ -256,7 +231,7 @@ def prosody_for_archetype(archetype: str, confidence: float | None = None,
         choose_secondary = False
     elif mode == "secondary":
         choose_secondary = True
-    else:  # "hybrid"
+    else:
         p_secondary = secondary_prob
         if confidence is not None:
             p_secondary = max(0.05, secondary_prob * (1.0 - float(confidence)))
@@ -293,84 +268,378 @@ def gemini_text(model, prompt: str, tries: int = 3, base_sleep: float = 1.2) -> 
             time.sleep(base_sleep * (2 ** attempt))
     return None
 
-def generate_storyline(model, title, ing, tradition, moda, prosody, cadenza, feel, archetype, use_llm=True) -> str:
-    prosody_guide = PROSODY_STYLE_GUIDE.get(prosody, "Balanced phrasing; clear structure.")
-    cadenza_guide = CADENZA_STYLE_GUIDE.get(cadenza, "Finish with balance.")
+# ---------- Few-shot examples (compact, symbolic, prosody-aware) ----------
+FEW_SHOT_EXAMPLES = [
+    {
+        "title": "Charred Cabbage with Lobster Stock and Fennel Pollen",
+        "ing": "cabbage, lobster stock, fennel pollen",
+        "moda": "Symphony",
+        "prosody": "Maestoso",
+        "cadenza": "Crescendo",
+        "archetype": "Alchemist",
+        "story": "The cabbage falls inward, a ruin of smoke and sea. Fennel’s gold ascends—brass in the air, exalted and unyielding."
+    },
+    {
+        "title": "Goat Milk Custard with Lemon Verbena and Charred Honey",
+        "ing": "goat milk, lemon verbena, charred honey",
+        "moda": "Nocturne",
+        "prosody": "Rubato",
+        "cadenza": "Sfumato",
+        "archetype": "Oracle",
+        "story": "The custard speaks in fog—verbena and flame dissolved in milk’s embrace. Honey closes like a shadowed chord, lingering as autumn’s breath suspended in silence."
+    },
+    {
+        "title": "Turkish Courgette Fritters with Dill Yogurt and Pomegranate",
+        "ing": "courgette, dill, yogurt, pomegranate, feta",
+        "moda": "Tableau",
+        "prosody": "Allegretto",
+        "cadenza": "Vivace",
+        "archetype": "Host",
+        "story": "Green clouds of courgette, kissed with feta's salt, dance in sunshine. A creamy, herbed whisper, then ruby pomegranate pops, bright and convivial."
+    },
+]
+
+# ---------- Narrative refinement utilities ----------
+ARchetype_LEXICONS = {
+    "Host": {
+        "motifs": ["warmth","hearth","invitation","communal","aperitivo","convivial"],
+        "adjs": ["hospitable","sunlit","ruminant","buttery","welcoming"],
+        "verbs": ["gather","offer","fold","pass"]
+    },
+    "Curator": {
+        "motifs": ["detail","craft","archive","folio","precise","refined"],
+        "adjs": ["meticulous","polished","nuanced","textured"],
+        "verbs": ["catalog","select","arrange","frame"]
+    },
+    "Wanderer": {
+        "motifs": ["road","market","passport","laneway","memory"],
+        "adjs": ["roving","spiced","nomadic","weathered"],
+        "verbs": ["roam","trace","fold","glimpse"]
+    },
+    "Oracle": {
+        "motifs": ["insight","glyph","codex","hush","oracle"],
+        "adjs": ["luminous","murmured","ancient","sacral"],
+        "verbs": ["reveal","linger","unfold","intone"]
+    },
+    "Alchemist": {
+        "motifs": ["transmutation","ember","mettle","alchemy"],
+        "adjs": ["sublime","charred","resinous","incandescent"],
+        "verbs": ["distill","transmute","coax","ferment"]
+    },
+    "default": {"motifs":["taste","texture"], "adjs":["bright","soft"], "verbs":["sing","hint"]}
+}
+
+CADENZA_CLOSURES = {
+    "Crescendo": {"type":"swell","templates":["rising to a {intensity} swell.","building to a {intensity} close."]},
+    "Sfumato":   {"type":"fade","templates":["melting into a {mood} hush.","fading like {mood} dusk."]},
+    "Maestoso":  {"type":"declarative","templates":["and it stands, {weight}.","a {weight} declaration."]},
+    "Vivace":    {"type":"lift","templates":["and it lifts, playful and bright.","ending on a lively, uplifted note."]},
+    "Presto":    {"type":"snap","templates":["then it snaps shut, quick and clean.","a brisk close, sharp and sudden."]},
+    "Fermata":   {"type":"linger","templates":["and it lingers, held like a bell.","hung in quiet resonance."]},
+    "Moderato":  {"type":"steady","templates":["settling into even measure.","evenly balanced at the close."]},
+    "Lento":     {"type":"slow","templates":["and it exhales into calm.","a slow, deliberate hush."]},
+}
+
+PROSODY_TEMPLATES = {
+    "Staccato": lambda rng: ["{short}. {short}.", "{short}. {short}, {short}."],
+    "Presto":   lambda rng: ["{short} {short}. {short}.", "{short}, {short}, {short}."],
+    "Cantabile":lambda rng: ["{long}, {link} {long}.", "{long} and {long}."],
+    "Adagio":   lambda rng: ["{long}. {long}.", "{long}; {long}."],
+    "Rubato":   lambda rng: ["{long}, {short}.", "{short}, {long}."],
+    "Scherzando":lambda rng: ["{short} with {motif}. {long}.", "{long}, then {short}."],
+    "Allegretto":lambda rng: ["{long}. {short}.", "{short}, {long}."],
+    "Moderato": lambda rng: ["{long}. {long}.", "{long}; {short}."],
+    "Murmure":  lambda rng: ["{short}, {soft}. {soft}.", "{soft}; {soft}."],
+    "Vivace":   lambda rng: ["{short}! {short}.", "{short}, {short}!"],
+    "Sfumato":  lambda rng: ["{long}, like {motif}. {soft}.", "{soft}, {soft}."],
+}
+
+MODA_TO_AMBIENCE = {
+    "Nocturne": ["dusk","night-salt","shadow","dew"],
+    "Virtuoso": ["polish","gleam","late-summer light","brass"],
+    "Elixir":   ["steam","broth-warmth","herbal steam","simmer"],
+    "Tableau":  ["citrus-bright","garden dew","sunlit","market haze"],
+    "Symphony": ["brass","score","resonance","choral"],
+}
+
+def _local_rng(seed: int | None = None):
+    r = random.Random()
+    if seed is not None:
+        r.seed(int(seed))
+    return r
+
+def _pick(rng, seq, default=None):
+    if not seq: return default
+    return seq[int(rng.random() * len(seq)) % len(seq)]
+
+def _ensure_anchor(text: str, anchor: str) -> str:
+    if not anchor: return text
+    if anchor.lower() in text.lower(): return text
+    parts = SENT_RE.findall(text)
+    if parts:
+        parts[0] = parts[0].rstrip(" .!,;:") + f", with {anchor}"
+        return " ".join(parts[:2])
+    return f"{text} with {anchor}"
+
+def _apply_cadenza_suffix(sentence2: str, cadenza: str, moda: str, rng=None):
+    rng = rng or _local_rng()
+    cfg = CADENZA_CLOSURES.get(cadenza) or CADENZA_CLOSURES.get("Moderato")
+    tpl = _pick(rng, cfg["templates"], cfg["templates"][0])
+    intensities = ["a bright", "a slow", "a hushed", "a full"]
+    moods = ["dusk","hush","fog","amber"]
+    weights = ["a stately weight","a confident weight","a measured weight"]
+    filled = tpl.format(intensity=_pick(rng,intensities), mood=_pick(rng,moods), weight=_pick(rng,weights))
+    if sentence2.endswith((".", "!", "?")):
+        sentence2 = sentence2.rstrip(".!?") + ". " + filled
+    else:
+        sentence2 = sentence2 + " " + filled
+    return sentence2
+
+def _compose_from_template(title, ing, moda, prosody, cadenza, archetype, feel, rng_seed=None):
+    rng = _local_rng(rng_seed)
+    lex = ARchetype_LEXICONS.get(archetype, ARchetype_LEXICONS.get("default"))
+    motif = _pick(rng, lex.get("motifs",[]), "")
+    adj1 = _pick(rng, lex.get("adjs",[]), "")
+    verb1 = _pick(rng, lex.get("verbs",[]), "")
+    moda_tokens = MODA_TO_AMBIENCE.get(moda, [])
+    moda_tok = _pick(rng, moda_tokens, moda.lower())
     parts = [p.strip() for p in ing.split(",") if p.strip()]
-    first_ing  = parts[0] if parts else ing.strip()
-    second_ing = parts[1] if len(parts) > 1 else ""
-
-    prompt = f"""
-You are a poetic culinary narrator, trained in the Ricettario tradition.
-Write a sensory story in EXACTLY TWO sentences (<= 50 words total). Avoid instructions; do not explain—evoke.
-
-Context:
-• Title: {title}
-• Ingredients: {ing}
-• Culinary Tradition: {tradition}
-• Moda (emotional color): {moda}
-• Prosody (style): {prosody} → {prosody_guide}
-• Cadenza (closing gesture): {cadenza} → {cadenza_guide}
-• Narrative Feel: {feel}
-• Archetype Essence: {archetype}
-
-Requirements:
-• Use the prosody style in rhythm and phrasing.
-• Let the cadenza shape the second sentence’s finish.
-• Weave in {first_ing}{(" and " + second_ing) if second_ing else ""} as sensory anchors.
-• Keep it elegant, metaphor-rich, and human.
-Two sentences only.
-""".strip()
-
-    if use_llm:
-        txt = gemini_text(model, prompt, tries=3, base_sleep=1.2)
-        if txt:
-            sents = SENT_RE.findall(txt)
-            return " ".join(s.strip() for s in sents[:2]) if sents else txt
-
-    # deterministic fallback
-    if prosody in ("Staccato","Presto"):
-        return (f"{title}: {first_ing} strikes quick. "
-                f"It lands, bright and gone, a {moda.lower()} flicker.")
-    if prosody in ("Cantabile","Adagio","Murmure","Sfumato"):
-        return (f"In {title}, {first_ing} drifts softly. "
-                f"The close lingers in {moda.lower()} hush.")
-    if prosody in ("Rubato","Moderato","Maestoso","Allegretto"):
-        return (f"{title} opens with {first_ing} in poised measure. "
-                f"The finish gathers {moda.lower()} weight.")
-    return (f"{title} moves with {prosody.lower()} grace. "
-            f"It finishes in {cadenza.lower()} cadence.")
-
-import re
-
-TITLE_HEADING_TMPL = (
-    r"^\s*(?:#+\s*)?"     # optional “### ” style heading
-    r"[*_~]*\s*"          # optional ** / __ / ~~ emphasis marks
-    r"{title}"            # the title itself (escaped later)
-    r"\s*[*_~]*\s*$"      # optional emphasis marks / trailing space
-)
+    first_ing = parts[0] if parts else ""
+    short = f"{first_ing} {verb1}" if first_ing else f"{verb1}"
+    long = f"{adj1} {motif}" if adj1 and motif else f"{adj1} {motif or moda_tok}".strip()
+    link = _pick(rng, ["and", "as", "while", "against"], "and")
+    soft = _pick(rng, ["a hush","a coil of steam","a velvet hush"], "a hush")
+    tmpl_func = PROSODY_TEMPLATES.get(prosody, PROSODY_TEMPLATES["Moderato"])
+    template = _pick(rng, tmpl_func(rng), tmpl_func(rng)[0])
+    sent1 = template.format(short=short, long=long, link=link, motif=motif, soft=soft)
+    if first_ing and first_ing.lower() not in sent1.lower():
+        sent1 = sent1.rstrip(".!,;:") + f", with {first_ing}."
+    else:
+        if not sent1.endswith("."):
+            sent1 = sent1.rstrip() + "."
+    sent2_core = f"A {moda_tok} {adj1} note follows" if adj1 else f"A {moda_tok} note follows"
+    sent2 = sent2_core.capitalize() + "."
+    sent2 = _apply_cadenza_suffix(sent2.rstrip("."), cadenza, moda, rng)
+    story = f"{sent1} {sent2}"
+    story = re.sub(r"\s+", " ", story).strip()
+    sents = SENT_RE.findall(story)
+    story = " ".join(s.strip() for s in sents[:2])
+    return story
 
 def _strip_repeated_title(title: str, story: str, min_overlap: float = 0.6) -> str:
-    """Remove any first-line heading that just repeats the recipe title."""
-    heading_re = re.compile(
-        TITLE_HEADING_TMPL.format(title=re.escape(title)),
-        flags=re.I,
+    TITLE_HEADING_TMPL = (
+        r"^\s*(?:#+\s*)?"
+        r"[*_~]*\s*"
+        r"{title}"
+        r"\s*[*_~]*\s*$"
     )
-
-    lines = [ln for ln in story.splitlines() if ln.strip()]   # keep non-blank
+    heading_re = re.compile(TITLE_HEADING_TMPL.format(title=re.escape(title)), flags=re.I)
+    lines = [ln for ln in story.splitlines() if ln.strip()]
     if lines and heading_re.match(lines[0]):
         story = "\n".join(lines[1:]).lstrip()
-
-    # ── optional word-overlap fallback (keeps previous behaviour) ──
     first_clause = re.split(r"[.!?]", story, maxsplit=1)[0]
     title_words  = set(re.sub(r"[^\w]", " ", title.lower()).split())
     clause_words = set(re.sub(r"[^\w]", " ", first_clause.lower()).split())
     overlap = len(title_words & clause_words) / (len(title_words | clause_words) or 1)
-
     if overlap >= min_overlap:
         story = story[len(first_clause):].lstrip(" .,!?:–—-*")
-
     return story
+
+# ---------- Strict few-shot prompt + validated retry loop (used by generate_storyline) ----------
+def _validate_story(story_text: str, first_ing: str, cadenza: str, max_words: int = 50):
+    sents = SENT_RE.findall(story_text)
+    if len(sents) != 2:
+        return False, "sentence_count"
+    words = len(re.findall(r"\w+", story_text))
+    if words > max_words:
+        return False, "word_count"
+    if first_ing:
+        low = story_text.lower()
+        fi = first_ing.lower()
+        if fi not in low and fi.rstrip("s") not in low:
+            return False, "anchor_missing"
+    cfg = CADENZA_CLOSURES.get(cadenza, {})
+    keywords = []
+    for t in cfg.get("templates", []):
+        keywords += re.findall(r"\b[a-zA-Z]{3,}\b", t)
+    keywords = set(k.lower() for k in keywords)
+    if keywords:
+        if not any(k in story_text.lower() for k in list(keywords)[:3]):
+            return False, "cadenza_cue_missing"
+    return True, ""
+
+# ---------- Revised generate_storyline (drop-in) ----------
+def generate_storyline(model, title, ing, tradition, moda, prosody, cadenza, feel, archetype,
+                       use_llm=True, rng_seed=None, max_tries=3, n_candidates=4):
+    """
+    Improved pipeline:
+    1) Build strict few-shot prompt (existing FEW_SHOT_EXAMPLES).
+    2) Request up to `n_candidates` outputs (via repeated calls).
+    3) Validate basic constraints (2 sentences, <=50 words, first ingredient anchor).
+    4) Score candidates by presence of archetype lexicon, moda ambience, cadenza keywords, and prosody rhythm heuristics.
+    5) Return top-scoring candidate or deterministic fallback.
+    """
+    parts = [p.strip() for p in ing.split(",") if p.strip()]
+    first_ing = parts[0] if parts else ""
+    arche_lex = ARchetype_LEXICONS.get(archetype, ARchetype_LEXICONS["default"])
+    moda_tokens = MODA_TO_AMBIENCE.get(moda, [])
+    # build few-shot block
+    few_shot_block = "\n\n".join(
+        f"Input: Title: {ex['title']} | Ingredients: {ex['ing']} | Moda: {ex['moda']} | Prosody: {ex['prosody']} | Cadenza: {ex['cadenza']} | Archetype: {ex['archetype']}\nOutput: {ex['story']}"
+        for ex in FEW_SHOT_EXAMPLES[:3]
+    )
+    # escape JSON braces in template
+    prompt_template = (
+        "You are a Ricettario narrator. RETURN JSON ONLY: {{\"story\":\"<two sentences>\"}}.\n\n"
+        "STRICT CONSTRAINTS (machine-verify):\n"
+        "1) EXACTLY two sentences.\n"
+        "2) <= 50 words total.\n"
+        "3) Must include the first listed ingredient token (singular or plural).\n"
+        "4) Do not repeat the recipe title verbatim as a heading.\n"
+        "5) Use Prosody (shape rhythm) and Cadenza (shape closure) as style constraints.\n\n"
+        "FEW-SHOT EXEMPLARS (follow these patterns exactly):\n\n"
+        "{few_shot_block}\n\n"
+        "NOW GENERATE for the Input below.\n\n"
+        "Input: Title: {title} | Ingredients: {ing} | Moda: {moda} | Prosody: {prosody} | Cadenza: {cadenza} | Archetype: {archetype}\n\n"
+        "OUTPUT (JSON): {{\"story\": \"<two sentences>\"}}"
+    )
+
+    prompt = prompt_template.format(
+        few_shot_block=few_shot_block,
+        title=title,
+        ing=ing,
+        moda=moda,
+        prosody=prosody,
+        cadenza=cadenza,
+        archetype=archetype
+    )
+
+    def basic_validate(story_text: str, max_words: int = 50):
+        sents = SENT_RE.findall(story_text)
+        if len(sents) != 2:
+            return False, "sentence_count"
+        words = len(re.findall(r"\w+", story_text))
+        if words > max_words:
+            return False, "word_count"
+        if first_ing:
+            low = story_text.lower()
+            fi = first_ing.lower()
+            if fi not in low and fi.rstrip("s") not in low:
+                return False, "anchor_missing"
+        return True, ""
+
+    def extract_story_from_raw(raw: str):
+        # prefer JSON extract then fallback to first two sentences
+        m = re.search(r"\{.*\}", raw, flags=re.S)
+        if m:
+            try:
+                parsed = json.loads(m.group(0))
+                s = parsed.get("story", "").strip()
+                if s:
+                    return s
+            except Exception:
+                pass
+        sents = SENT_RE.findall(raw)
+        return " ".join(s.strip() for s in sents[:2]) if sents else raw.strip()
+
+    def score_candidate(story_text: str) -> int:
+        score = 0
+        low = story_text.lower()
+        # anchor
+        if first_ing and (first_ing.lower() in low or first_ing.rstrip("s").lower() in low):
+            score += 4
+        # archetype lexicon
+        lex_hits = 0
+        for tok_list in (arche_lex.get("motifs", []), arche_lex.get("adjs", []), arche_lex.get("verbs", [])):
+            for tok in tok_list:
+                if tok.lower() in low:
+                    lex_hits += 1
+        score += min(6, lex_hits * 2)  # up to +6
+        # moda ambience
+        moda_hits = sum(1 for t in moda_tokens if t.lower() in low)
+        score += min(3, moda_hits * 2)
+        # cadenza cue
+        cfg = CADENZA_CLOSURES.get(cadenza, {})
+        cadenza_kw = []
+        for t in cfg.get("templates", []):
+            cadenza_kw += re.findall(r"\b[a-zA-Z]{3,}\b", t)
+        if any(k.lower() in low for k in cadenza_kw[:4]):
+            score += 3
+        # prosody heuristics: measure sentence length pattern
+        sents = [s.strip() for s in SENT_RE.findall(story_text)]
+        if len(sents) == 2:
+            w1 = len(re.findall(r"\w+", sents[0]))
+            w2 = len(re.findall(r"\w+", sents[1]))
+            # prosody-specific preferences (simple heuristics)
+            p = prosody.lower()
+            if "maestoso" in p or "lento" in p or "adagio" in p:
+                if w1 >= 7 and w2 >= 7:
+                    score += 2
+            if "allegretto" in p or "vivace" in p:
+                if w1 >= 6 and w2 <= w1:
+                    score += 2
+            if "rubato" in p:
+                if abs(w1 - w2) >= 3:
+                    score += 2
+            if "staccato" in p or "presto" in p:
+                if w1 <= 6 and w2 <= 6:
+                    score += 2
+            # crescendo preference: second longer than first
+            if "crescendo" in cadenza.lower() and w2 > w1:
+                score += 2
+            # sfumato preference: closing words that feel like 'hush','dusk','linger'
+            if "sfumato" in cadenza.lower():
+                if any(x in low for x in ["hush", "fade", "linger", "dusk", "soft"]):
+                    score += 2
+        # small penalty if purely listy/menu-like (many commas and plain adjectives)
+        comma_count = low.count(",")
+        if comma_count > 3:
+            score -= 1
+        return score
+
+    # 1) produce candidates via LLM attempts
+    candidates = []
+    if use_llm and model is not None:
+        for i in range(n_candidates):
+            raw = gemini_text(model, prompt, tries=1, base_sleep=0.6)
+            if not raw:
+                continue
+            try:
+                # optional debug view while tuning
+                #st.text_area(f"raw_llm_{i+1}", raw, height=90)
+                pass
+            except Exception:
+                pass
+            story = extract_story_from_raw(raw)
+            story = _strip_repeated_title(title, story)
+            valid, reason = basic_validate(story)
+            sc = score_candidate(story) if valid else 0
+            candidates.append({"story": story, "raw": raw, "valid": valid, "reason": reason, "score": sc})
+
+            # small prompt tightening if invalid and more tries permitted
+            if (not valid) and i < n_candidates - 1:
+                prompt += "\n\nVALIDATION: previous output failed validation. RETURN JSON EXACTLY and follow constraints strictly."
+
+    # 2) choose best candidate if any
+    if candidates:
+        # prefer valid candidates, then highest score
+        valid_cands = [c for c in candidates if c["valid"]]
+        pool = valid_cands if valid_cands else candidates
+        best = max(pool, key=lambda c: c["score"])
+        # Accept if score above threshold or valid
+        if best["valid"] and best["score"] >= 6:
+            return best["story"]
+        if best["valid"] and best["score"] >= 4:
+            # minor accept; may still be good
+            return best["story"]
+
+    # 3) fallback deterministic composer (guaranteed prosody/cadenza enforcement)
+    fallback = _compose_from_template(title, ing, moda, prosody, cadenza, archetype, feel, rng_seed)
+    fallback = _strip_repeated_title(title, fallback)
+    # ensure anchor present
+    if first_ing and first_ing.lower() not in fallback.lower():
+        fallback = _ensure_anchor(fallback, first_ing)
+    return fallback
 
 
 # =========================
@@ -381,63 +650,40 @@ if seed_val:
 recipes_df = load_recipes_df_from_path(RECIPES_PATH)
 index, item_vecs, archetype_vecs, emb_model = build_item_index(recipes_df, EMB_MODEL_ID)
 
-
-
-import difflib
-
-# ------------------------------------------------------------------
-# helper: drop leading sentence if it mostly repeats the title
-# ------------------------------------------------------------------
-
-
 # =========================
-# Tabs
+# UI: Tabs
 # =========================
 tab1, tab2, tab3 = st.tabs(["1) User Demographics", "2) Questionnaire", "3) Recommendations"])
 
 # ---------- TAB 1: Demographics ----------
-# ---------- TAB 1: Demographics (3 partitions: Checks | Sliders | Other) ----------
-# ---------- TAB 1: Demographics ----------
 with tab1:
-    # Get existing demographics from session state for defaults
     existing_demo = st.session_state.get("demographics", {})
-
     with st.form(key="demographics_form"):
-        col_other, col_checks, col_sliders = st.columns([1.0, 1.0, 1.0])
-
-        # ------------------ OTHER INPUTS PARTITION ------------------
+        col_other, col_checks, col_sliders = st.columns([1.0,1.0,1.0])
         with col_other:
             st.markdown("### Core Profile & Context")
             o1, o2 = st.columns(2)
             name = o1.text_input("Name", value=existing_demo.get("Name", "Steven Burton"))
-            age = o2.number_input("Age", min_value=16, max_value=99, value=existing_demo.get("Age", 19))
-
+            age = o2.number_input("Age", min_value=16, max_value=99, value=int(existing_demo.get("Age", 19)))
             genders = ["Male","Female","Non-binary","Prefer not to say"]
             gender_idx = genders.index(existing_demo.get("Gender", "Male")) if existing_demo.get("Gender") in genders else 0
             gender = st.selectbox("Gender", genders, index=gender_idx)
             location = st.text_input("Location", value=existing_demo.get("Location", "Dallas"))
-
             st.markdown("---")
             edu_opts = ["High School","Associate","Bachelor's","Master's","PhD"]
             edu_idx = edu_opts.index(existing_demo.get("Highly_Educated", "Bachelor's")) if existing_demo.get("Highly_Educated") in edu_opts else 2
             highly_educated = st.selectbox("Highest Education", edu_opts, index=edu_idx)
-            
             diet_opts = ["None","Vegan","Vegetarian","Pescatarian","Keto","Paleo","Halal","Kosher"]
             diet_idx = diet_opts.index(existing_demo.get("Dietary_Preferences", "Vegan")) if existing_demo.get("Dietary_Preferences") in diet_opts else 1
             dietary_pref = st.selectbox("Dietary Preferences", diet_opts, index=diet_idx)
-            
             channel_opts = ["Online","In-store","Omnichannel"]
             channel_idx = channel_opts.index(existing_demo.get("Preferred_Shopping_Channel", "Online")) if existing_demo.get("Preferred_Shopping_Channel") in channel_opts else 0
             pref_channel = st.selectbox("Preferred Shopping Channel", channel_opts, index=channel_idx)
-
             hobbies = st.text_input("Hobbies & Interests", value=existing_demo.get("Hobbies_Interests", "Fitness"))
-            affluent = st.number_input("Affluent (annual income)", value=existing_demo.get("Affluent", 141924), step=1000)
-
-        # ------------------ CHECKBOX PARTITION ------------------
+            affluent = st.number_input("Affluent (annual income)", value=float(existing_demo.get("Affluent", 141924)), step=1000.0)
         with col_checks:
             st.markdown("### Life Stage & Affiliation")
             cb1, cb2 = st.columns(2)
-
             millennial_women = cb1.checkbox("Millennial Women", value=bool(existing_demo.get("Millennial_Women", False)))
             modern_mom = cb2.checkbox("Modern Mom", value=bool(existing_demo.get("Modern_Mom", False)))
             gen_z = cb1.checkbox("Gen Z", value=bool(existing_demo.get("Gen_Z", True)))
@@ -451,27 +697,21 @@ with tab1:
             dinks = cb1.checkbox("DINKS", value=bool(existing_demo.get("DINKS", False)))
             empty_nesters = cb2.checkbox("Empty Nesters", value=bool(existing_demo.get("Empty_Nesters", False)))
             emerging_adults = cb1.checkbox("Emerging Adults", value=bool(existing_demo.get("Emerging_Adults", True)))
-
-        # ------------------ SLIDER PARTITION ------------------
         with col_sliders:
             st.markdown("### Preference & Behavior Scales")
-            globally_intuitive = st.slider("Globally Intuitive (0–10)", 0, 10, existing_demo.get("Globally_Intuitive", 10))
-            moving_doing = st.slider("Moving & Doing Constantly (0–10)", 0, 10, existing_demo.get("Moving_Doing_Constantly", 8))
-            social_offline = st.slider("Socially Active Offline (0–10)", 0, 10, existing_demo.get("Socially_Active_Offline", 9))
-            experience_driven = st.slider("Experience Driven (0–10)", 0, 10, existing_demo.get("Experience_Driven", 1))
-            quality_conscious = st.slider("Quality Conscious (0–10)", 0, 10, existing_demo.get("Quality_Conscious", 3))
-            tech_savvy = st.slider("Tech Savvy (0–10)", 0, 10, existing_demo.get("Tech_Savvy", 6))
-            shopping_freq = st.slider("Shopping Frequency (0–10)", 0, 10, existing_demo.get("Shopping_Frequency", 10))
+            globally_intuitive = st.slider("Globally Intuitive (0–10)", 0, 10, int(existing_demo.get("Globally_Intuitive", 10)))
+            moving_doing = st.slider("Moving & Doing Constantly (0–10)", 0, 10, int(existing_demo.get("Moving_Doing_Constantly", 8)))
+            social_offline = st.slider("Socially Active Offline (0–10)", 0, 10, int(existing_demo.get("Socially_Active_Offline", 9)))
+            experience_driven = st.slider("Experience Driven (0–10)", 0, 10, int(existing_demo.get("Experience_Driven", 1)))
+            quality_conscious = st.slider("Quality Conscious (0–10)", 0, 10, int(existing_demo.get("Quality_Conscious", 3)))
+            tech_savvy = st.slider("Tech Savvy (0–10)", 0, 10, int(existing_demo.get("Tech_Savvy", 6)))
+            shopping_freq = st.slider("Shopping Frequency (0–10)", 0, 10, int(existing_demo.get("Shopping_Frequency", 10)))
             brand_loyalty = st.slider("Brand Loyalty (0.0–1.0)", 0.0, 1.0, float(existing_demo.get("Brand_Loyalty", 0.65)))
-            env_conscious = st.slider("Environmental Consciousness (0–10)", 0, 10, existing_demo.get("Environmental_Consciousness", 0))
-            social_resp = st.slider("Social Responsibility Awareness (0–10)", 0, 10, existing_demo.get("Social_Responsibility_Awareness", 8))
-            innovation_seeking = st.slider("Innovation & Novelty Seeking (0–10)", 0, 10, existing_demo.get("Innovation_Novelty_Seeking", 8))
-            personalization = st.slider("Personalization Preference (0–10)", 0, 10, existing_demo.get("Personalization_Preference", 10))
-
-        # Form submit button
+            env_conscious = st.slider("Environmental Consciousness (0–10)", 0, 10, int(existing_demo.get("Environmental_Consciousness", 0)))
+            social_resp = st.slider("Social Responsibility Awareness (0–10)", 0, 10, int(existing_demo.get("Social_Responsibility_Awareness", 8)))
+            innovation_seeking = st.slider("Innovation & Novelty Seeking (0–10)", 0, 10, int(existing_demo.get("Innovation_Novelty_Seeking", 8)))
+            personalization = st.slider("Personalization Preference (0–10)", 0, 10, int(existing_demo.get("Personalization_Preference", 10)))
         submitted = st.form_submit_button("Save Demographics", type="primary", use_container_width=True)
-    
-    # Only update session state when form is submitted
     if submitted:
         st.session_state["demographics"] = {
             "Name": name, "Age": age, "Gender": gender, "Location": location,
@@ -507,16 +747,12 @@ with tab1:
             "Personalization_Preference": personalization,
         }
         st.success("Demographics saved successfully!")
-    
-    # Show current saved data
     if "demographics" in st.session_state:
         with st.expander("View Saved Demographics"):
             st.json(st.session_state["demographics"])
-# ---------- TAB 2: Questionnaire ----------
-# ---------- TAB 2: Questionnaire (33 questions, full text + options) ----------
-with tab2:
-    #st.subheader("Questionnaire")
 
+# ---------- TAB 2: Questionnaire ----------
+with tab2:
     QUESTIONS = [
         {
             "q": "When selecting an everyday item, what primarily guides your choice?",
@@ -817,65 +1053,50 @@ with tab2:
         },
     ]
 
-    # Render
-    # 1️ — create / repair the defaults dict so every Q has an index
+    # Render questionnaire defaults and UI
     q_defaults = st.session_state.get("q_defaults", {})
-    if len(q_defaults) != len(QUESTIONS):         # new run or QUESTIONS length changed
-        q_defaults = {}                           # start fresh
+    if len(q_defaults) != len(QUESTIONS):
+        q_defaults = {}
     for i, item in enumerate(QUESTIONS, start=1):
         q_key = str(i)
-        if q_key not in q_defaults:               # add any missing key
+        if q_key not in q_defaults:
             q_defaults[q_key] = random.randrange(len(item["opts"]))
-    st.session_state["q_defaults"] = q_defaults   # persist back
-
-    # 2️ — render the survey
+    st.session_state["q_defaults"] = q_defaults
     answers = {}
     for i, item in enumerate(QUESTIONS, start=1):
         q_key = str(i)
         st.markdown(f"**Q{i}. {item['q']}**")
-
         cols = st.columns(2)
         selected = []
         for j, opt in enumerate(item["opts"]):
             col = cols[j % 2]
             default_checked = (j == q_defaults[q_key])
-            checked = col.checkbox(
-                opt,
-                key=f"Q{i}_opt{j}",
-                value=default_checked,
-            )
+            checked = col.checkbox(opt, key=f"Q{i}_opt{j}", value=default_checked)
             if checked:
                 selected.append(opt)
-
-        # 3️ — ensure at least one option stays checked
         if not selected:
             default_j = q_defaults[q_key]
             st.session_state[f"Q{i}_opt{default_j}"] = True
             selected.append(item["opts"][default_j])
-
         answers[f"Q{i}"] = selected
         st.divider()
-
-    # 4️ — save all answers
     st.session_state["questionnaire"] = answers
     st.success("Questionnaire saved with current selections.")
+
 # ---------- TAB 3: Recommendations ----------
 with tab3:
     st.subheader("Build Profile → Assign Archetype → Generate Recommendations")
-
     demo = st.session_state.get("demographics", {})
     qans = st.session_state.get("questionnaire", {})
 
     def build_joined_text(demo: Dict[str, Any], qans: Dict[str, Any]) -> str:
         parts = []
-        # Demographics
         for k, v in demo.items():
             if isinstance(v, dict):
                 for kk, vv in v.items():
                     if vv: parts.append(f"{kk} {vv}")
             else:
                 parts.append(f"{k} {v}")
-        # Questionnaire
         for k, v in qans.items():
             parts.append(f"{k} {v}")
         return " ".join(map(str, parts))
@@ -891,16 +1112,12 @@ with tab3:
         compute_btn = st.button("Compute Archetype & Style", type="primary")
 
     if compute_btn:
-        # Embed profile text vs archetypes to assign primary archetype
         mem_vec = load_embedder(EMB_MODEL_ID).encode([joined], show_progress_bar=False)
-        sims = cosine_similarity(mem_vec, build_item_index(recipes_df, EMB_MODEL_ID)[2])[0]  # archetype_vecs
+        sims = cosine_similarity(mem_vec, build_item_index(recipes_df, EMB_MODEL_ID)[2])[0]
         best_idx = int(np.argmax(sims))
         primary_arch = ARCHES[best_idx]
         confidence = float(sims[best_idx])
-
-        # Fix Prosody/Cadenza for this user (per sidebar mode)
         prosody, cadenza, feel, persona = prosody_for_archetype(primary_arch, confidence, mode='primary')
-
         st.session_state["profile_result"] = {
             "primary_archetype": primary_arch,
             "confidence": confidence,
@@ -914,7 +1131,6 @@ with tab3:
     if prof:
         c1, c3, c4 = st.columns(3)
         c1.metric("Archetype", prof["primary_archetype"])
-        #c2.metric("Confidence", f"{prof['confidence']:.3f}")
         c3.metric("Prosody", prof["prosody"])
         c4.metric("Cadenza", prof["cadenza"])
         with st.expander("Narrative Style Details"):
@@ -922,13 +1138,12 @@ with tab3:
             st.markdown(f"**Narrative feel:** {prof['feel']}")
             st.markdown(f"**Prosody guide:** {PROSODY_STYLE_GUIDE.get(prof['prosody'],'—')}")
             st.markdown(f"**Cadenza guide:** {CADENZA_STYLE_GUIDE.get(prof['cadenza'],'—')}")
-
         st.divider()
         st.subheader("Recommendations")
 
         def recommend_topk(arch: str, k: int = 3, pool: int = 200) -> pd.DataFrame:
             arch_idx = ARCHES.index(arch)
-            qvec = build_item_index(recipes_df, EMB_MODEL_ID)[2][arch_idx].astype("float32").reshape(1,-1)  # archetype_vecs
+            qvec = build_item_index(recipes_df, EMB_MODEL_ID)[2][arch_idx].astype("float32").reshape(1,-1)
             if HAVE_FAISS:
                 D, I = build_item_index(recipes_df, EMB_MODEL_ID)[0].search(qvec, min(pool, len(recipes_df)))
                 pool_df = recipes_df.iloc[I[0]].copy()
@@ -937,13 +1152,11 @@ with tab3:
                 pool_df["score"] = 1.0 - d_norm
                 return pool_df.nlargest(k, "score")
             else:
-                # cosine similarity fallback
-                sims = cosine_similarity(qvec, build_item_index(recipes_df, EMB_MODEL_ID)[1])[0]  # item_vecs
+                sims = cosine_similarity(qvec, build_item_index(recipes_df, EMB_MODEL_ID)[1])[0]
                 top_idx = np.argsort(-sims)[:pool]
                 pool_df = recipes_df.iloc[top_idx].copy()
                 pool_df["score"] = sims[top_idx]
                 return pool_df.nlargest(k, "score")
-        
 
         if st.button("Generate Recommendations", type="primary"):
             recs = recommend_topk(prof["primary_archetype"], k=topk, pool=200)
@@ -963,14 +1176,12 @@ with tab3:
                     archetype = prof["primary_archetype"],
                     use_llm   = use_llm
                 )
-
-                story = _strip_repeated_title(title, story)  # <<< NEW
-                with st.container(border=True):
+                story = _strip_repeated_title(title, story)
+                with st.container():
                     st.markdown(f"### {title}")
-                    print(story)
                     st.write(story)
                     st.caption(f"**Moda:** {moda}  |  **Prosody/Cadenza:** {prof['prosody']} · {prof['cadenza']}")
-                    st.caption(f"**Narrative feel:** {prof['feel']}")                    
+                    st.caption(f"**Narrative feel:** {prof['feel']}")
                     with st.expander("Ingredients"):
                         st.write(r["ing_text"])
     else:
