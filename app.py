@@ -474,9 +474,26 @@ def generate_storyline(model, title, ing, tradition, moda, prosody, cadenza, fee
     Simplified, robust storyline generator with rich few-shot examples.
     Returns plain text (no JSON), with fallback scoring if needed.
     """
-    parts = [p.strip() for p in ing.split(",") if p.strip()]
-    first_ing = parts[0] if parts else ing.strip()
+    # Clean ingredient text - handle JSON structures
+    ing_clean = ing
+    if ing.strip().startswith('['):
+        try:
+            parsed = json.loads(ing)
+            if isinstance(parsed, list):
+                ing_clean = ", ".join(
+                    d.get("ingredient", str(d)) if isinstance(d, dict) else str(d) 
+                    for d in parsed
+                )
+        except:
+            pass
+    
+    parts = [p.strip() for p in ing_clean.split(",") if p.strip()]
+    first_ing = parts[0] if parts else ing_clean.strip()
     second_ing = parts[1] if len(parts) > 1 else ""
+    
+    # Extract just the ingredient name if it has extra details
+    first_ing = re.sub(r'\s*\(.*?\)', '', first_ing)  # Remove parentheses
+    first_ing = first_ing.split()[0] if len(first_ing.split()) > 3 else first_ing  # Take first word if too long
     
     prosody_guide = PROSODY_STYLE_GUIDE.get(prosody, "Balanced phrasing; clear structure.")
     cadenza_guide = CADENZA_STYLE_GUIDE.get(cadenza, "Finish with balance.")
@@ -517,12 +534,12 @@ Prosody: Cantabile | Cadenza: Fermata | Moda: Nocturne | Archetype: Mystic
     prompt = f"""You are a master Ricettario narrator crafting sensory micro-stories for culinary concoctions.
 
 CORE RULES:
-• Write EXACTLY 2 sentences, maximum 200 words total
-• MUST include "{first_ing}" as a sensory anchor (singular or plural form)
-• NEVER repeat or restate the recipe title in your opening
-• NO instructions, NO literal descriptions, NO menu language ("this dish", "the result")
-• Use symbolic, cinematic imagery with rhythm and motion
-• Channel archetype essence: {archetype} → {feel}
+- Write EXACTLY 2 sentences, maximum 50 words total
+- MUST include "{first_ing}" as a sensory anchor (singular or plural form)
+- NEVER repeat or restate the recipe title in your opening
+- NO instructions, NO literal descriptions, NO menu language ("this dish", "the result")
+- Use symbolic, cinematic imagery with rhythm and motion
+- Channel archetype essence: {archetype} → {feel}
 
 PROSODY (rhythm/phrasing): {prosody}
 → {prosody_guide}
@@ -541,7 +558,7 @@ Recipe: {title}
 Key Ingredients: {first_ing}{(", " + second_ing) if second_ing else ""}
 Prosody: {prosody} | Cadenza: {cadenza} | Moda: {moda} | Archetype: {archetype}
 
-Write your 2-sentence sensory micro-story (≤200 words, plain text only):"""
+Write your 2-sentence sensory micro-story (≤50 words, plain text only):"""
 
     if use_llm and model is not None:
         # Try to get response from Gemini
@@ -578,6 +595,10 @@ Write your 2-sentence sensory micro-story (≤200 words, plain text only):"""
     # FALLBACK: Deterministic narratives by style combination
     fallback_templates = {
         # (Prosody, Cadenza, Moda): template
+        ("Moderato", "Moderato", "Nocturne"): (
+            f"{first_ing} settles into dusk's quiet embrace, each element placed with measured intention. "
+            f"The finish deepens—grounded, complete, like nightfall closing over still water."
+        ),
         ("Allegretto", "Vivace", "Elixir"): (
             f"{first_ing} swirls dark and bright, an invitation whispered through cream's velvet fold. "
             f"The finish lifts—generous, convivial, leaving warmth on every tongue."
@@ -633,9 +654,13 @@ Write your 2-sentence sensory micro-story (≤200 words, plain text only):"""
         return (f"{first_ing} unfolds like silk across water, unhurried, a {moda.lower()} reverie. "
                 f"The world softens at the edges, dissolves into {cadenza.lower()} stillness.")
     
+    if prosody == "Moderato" and moda == "Nocturne":
+        return (f"{first_ing} arrives in twilight's measured breath, balanced between shadow and form. "
+                f"The finish holds—steady, complete, like evening settling over stone.")
+    
     if prosody in ("Rubato", "Moderato", "Maestoso"):
-        return (f"In measured ceremony, {first_ing} moves with {prosody.lower()} grace and intention. "
-                f"The close gathers {moda.lower()} weight, a {cadenza.lower()} declaration that lingers.")
+        return (f"{first_ing} moves with {prosody.lower()} precision, each element building quiet authority. "
+                f"The close gathers depth—{moda.lower()} weight that settles like ancestral memory.")
     
     if prosody in ("Allegretto", "Vivace", "Scherzando"):
         return (f"{first_ing} dances in {prosody.lower()} rhythm, light and assured. "
