@@ -446,7 +446,7 @@ def _strip_repeated_title(title: str, story: str, min_overlap: float = 0.6) -> s
     return story
 
 # ---------- Strict few-shot prompt + validated retry loop (used by generate_storyline) ----------
-def _validate_story(story_text: str, first_ing: str, cadenza: str, max_words: int = 100):
+def _validate_story(story_text: str, first_ing: str, cadenza: str, max_words: int = 150):
     sents = SENT_RE.findall(story_text)
     if len(sents) != 2:
         return False, "sentence_count"
@@ -475,7 +475,7 @@ def generate_storyline(model, title, ing, tradition, moda, prosody, cadenza, fee
     Improved pipeline:
     1) Build strict few-shot prompt (existing FEW_SHOT_EXAMPLES).
     2) Request up to `n_candidates` outputs (via repeated calls).
-    3) Validate basic constraints (2 sentences, <=100 words, first ingredient anchor).
+    3) Validate basic constraints (2 sentences, >=150 words, first ingredient anchor).
     4) Score candidates by presence of archetype lexicon, moda ambience, cadenza keywords, and prosody rhythm heuristics.
     5) Return top-scoring candidate or deterministic fallback.
     """
@@ -492,7 +492,7 @@ def generate_storyline(model, title, ing, tradition, moda, prosody, cadenza, fee
     prompt_template = (
     "You are a Ricettario narrator. RETURN JSON ONLY: {{\"story\":\"<two sentences>\"}}.\n\n"
     "STRICT CONSTRAINTS (machine-verifiable):\n"
-    "1) EXACTLY two sentences, <= 100 words total.\n"
+    "1) Follow the same narration style like few shot examples, <= 150 words total.\n"
     "2) Must include the first listed ingredient (singular or plural) as an anchor.\n"
     "3) Do NOT repeat or restate the recipe title.\n"
     "4) Each output must sound sensory and symbolic, not literal or descriptive.\n"
@@ -532,7 +532,7 @@ def generate_storyline(model, title, ing, tradition, moda, prosody, cadenza, fee
         archetype=archetype
     )
 
-    def basic_validate(story_text: str, max_words: int = 100):
+    def basic_validate(story_text: str, max_words: int = 150):
         sents = SENT_RE.findall(story_text)
         if len(sents) != 2:
             return False, "sentence_count"
