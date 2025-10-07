@@ -122,7 +122,7 @@ st.title("ARIA™ — Psychometric Recommender (MVP)")
 
 st.sidebar.header("App Settings")
 topk = st.sidebar.slider("Top-N recommendations", 1, 10, TOP_N_RECS_DEFAULT, 1)
-use_llm = st.sidebar.checkbox("Use Gemini for narratives", value=True)
+use_llm = st.sidebar.checkbox("Use AI for narratives", value=True)
 seed_val = 42
 
 # Gemini default key placeholder: set your key to enable LLM
@@ -446,7 +446,7 @@ def _strip_repeated_title(title: str, story: str, min_overlap: float = 0.6) -> s
     return story
 
 # ---------- Strict few-shot prompt + validated retry loop (used by generate_storyline) ----------
-def _validate_story(story_text: str, first_ing: str, cadenza: str, max_words: int = 150):
+def _validate_story(story_text: str, first_ing: str, cadenza: str, max_words: int = 200):
     sents = SENT_RE.findall(story_text)
     if len(sents) != 2:
         return False, "sentence_count"
@@ -469,196 +469,181 @@ def _validate_story(story_text: str, first_ing: str, cadenza: str, max_words: in
     return True, ""
 
 # ---------- Revised generate_storyline (drop-in) ----------
-def generate_storyline(model, title, ing, tradition, moda, prosody, cadenza, feel, archetype,
-                       use_llm=True, rng_seed=None, max_tries=3, n_candidates=4):
+def generate_storyline(model, title, ing, tradition, moda, prosody, cadenza, feel, archetype, use_llm=True) -> str:
     """
-    Improved pipeline:
-    1) Build strict few-shot prompt (existing FEW_SHOT_EXAMPLES).
-    2) Request up to `n_candidates` outputs (via repeated calls).
-    3) Validate basic constraints (2 sentences, >=150 words, first ingredient anchor).
-    4) Score candidates by presence of archetype lexicon, moda ambience, cadenza keywords, and prosody rhythm heuristics.
-    5) Return top-scoring candidate or deterministic fallback.
+    Simplified, robust storyline generator with rich few-shot examples.
+    Returns plain text (no JSON), with fallback scoring if needed.
     """
     parts = [p.strip() for p in ing.split(",") if p.strip()]
-    first_ing = parts[0] if parts else ""
-    arche_lex = ARchetype_LEXICONS.get(archetype, ARchetype_LEXICONS["default"])
-    moda_tokens = MODA_TO_AMBIENCE.get(moda, [])
-    # build few-shot block
-    few_shot_block = "\n\n".join(
-        f"Input: Title: {ex['title']} | Ingredients: {ex['ing']} | Moda: {ex['moda']} | Prosody: {ex['prosody']} | Cadenza: {ex['cadenza']} | Archetype: {ex['archetype']}\nOutput: {ex['story']}"
-        for ex in FEW_SHOT_EXAMPLES[:3]
-    )
-    # escape JSON braces in template
-    prompt_template = (
-    "You are a Ricettario narrator. RETURN JSON ONLY: {{\"story\":\"<two sentences>\"}}.\n\n"
-    "STRICT CONSTRAINTS (machine-verifiable):\n"
-    "1) Follow the same narration style like few shot examples, <= 150 words total.\n"
-    "2) Must include the first listed ingredient (singular or plural) as an anchor.\n"
-    "3) Do NOT repeat or restate the recipe title.\n"
-    "4) Each output must sound sensory and symbolic, not literal or descriptive.\n"
-    "5) Follow rhythm and closure:\n"
-    "   • Prosody shapes rhythm (e.g., Scherzando = playful leaps, Maestoso = grand cadence, Rubato = elastic phrasing).\n"
-    "   • Cadenza shapes closure (e.g., Crescendo = rising finish, Sfumato = fading end, Maestoso = declarative close).\n"
-    "6) Ensure narrative closure that matches Cadenza type — stories must resolve, not just stop.\n"
-    "7) Archetype tone must guide imagery (e.g., Oracle = prophetic, Alchemist = transmutational, Builder = grounded creation).\n"
-    "8) Never use menu-style phrasing like 'this dish' or 'the result'.\n\n"
-    "STYLE GUIDE:\n"
-    "- Write like a cinematic narrator evoking motion, color, and transformation.\n"
-    "- Use symbolic sensory anchors (fog, brass, honey, dusk, salt, shadow).\n"
-    "- Avoid redundancy, overuse of adjectives, or factual enumeration.\n\n"
-    "- Each sentence should have internal musical rhythm (balanced clauses, not fragments). Each story must feel complete.\n"
+    first_ing = parts[0] if parts else ing.strip()
+    second_ing = parts[1] if len(parts) > 1 else ""
+    
+    prosody_guide = PROSODY_STYLE_GUIDE.get(prosody, "Balanced phrasing; clear structure.")
+    cadenza_guide = CADENZA_STYLE_GUIDE.get(cadenza, "Finish with balance.")
 
-    "FEW-SHOT EXEMPLARS (imitate structure and rhythm):\n\n"
-    "{few_shot_block}\n\n"
-    "NOW GENERATE for the Input below.\n\n"
-    "Input:\n"
-    "Title: {title}\n"
-    "Ingredients: {ing}\n"
-    "Moda: {moda}\n"
-    "Prosody: {prosody}\n"
-    "Cadenza: {cadenza}\n"
-    "Archetype: {archetype}\n\n"
-    "OUTPUT (JSON): {{\"story\": \"<two sentences>\"}}"
-    )
+    # Rich few-shot examples covering diverse styles
+    few_shot_examples = """
+EXAMPLE 1:
+Recipe: Charred Cabbage with Lobster Stock and Fennel Pollen
+Prosody: Maestoso | Cadenza: Crescendo | Moda: Symphony | Archetype: Alchemist
+→ The cabbage falls inward, a ruin of smoke and sea. Fennel's gold ascends—brass in the air, exalted and unyielding.
 
+EXAMPLE 2:
+Recipe: Goat Milk Custard with Lemon Verbena and Charred Honey
+Prosody: Rubato | Cadenza: Sfumato | Moda: Nocturne | Archetype: Oracle
+→ The custard speaks in fog—verbena and flame dissolved in milk's embrace. Honey closes like a shadowed chord, lingering as autumn's breath suspended in silence.
 
-    prompt = prompt_template.format(
-        few_shot_block=few_shot_block,
-        title=title,
-        ing=ing,
-        moda=moda,
-        prosody=prosody,
-        cadenza=cadenza,
-        archetype=archetype
-    )
+EXAMPLE 3:
+Recipe: Turkish Courgette Fritters with Dill Yogurt and Pomegranate
+Prosody: Allegretto | Cadenza: Vivace | Moda: Tableau | Archetype: Host
+→ Courgette clouds leap golden from the oil, feta's salt singing with dill's green promise. Pomegranate jewels burst across the plate—bright laughter inviting every guest closer.
 
-    def basic_validate(story_text: str, max_words: int = 150):
-        sents = SENT_RE.findall(story_text)
-        if len(sents) != 2:
-            return False, "sentence_count"
-        words = len(re.findall(r"\w+", story_text))
-        if words > max_words:
-            return False, "word_count"
-        if first_ing:
-            low = story_text.lower()
-            fi = first_ing.lower()
-            if fi not in low and fi.rstrip("s") not in low:
-                return False, "anchor_missing"
-        return True, ""
+EXAMPLE 4:
+Recipe: Miso-Braised Short Rib with Black Garlic and Sesame
+Prosody: Lento | Cadenza: Maestoso | Moda: Elixir | Archetype: Guardian
+→ The rib surrenders slowly to miso's ancient embrace, black garlic whispering of time's patient alchemy. Sesame crowns the communion—grounded, dignified, complete.
 
-    def extract_story_from_raw(raw: str):
-        # prefer JSON extract then fallback to first two sentences
-        m = re.search(r"\{.*\}", raw, flags=re.S)
-        if m:
-            try:
-                parsed = json.loads(m.group(0))
-                s = parsed.get("story", "").strip()
-                if s:
-                    return s
-            except Exception:
-                pass
-        sents = SENT_RE.findall(raw)
-        return " ".join(s.strip() for s in sents[:2]) if sents else raw.strip()
+EXAMPLE 5:
+Recipe: Blood Orange Sorbet with Campari and Basil
+Prosody: Staccato | Cadenza: Presto | Moda: Tableau | Archetype: Provocateur
+→ Orange bleeds bitter-bright. Campari strikes—a crimson dare. Basil snaps the finish sharp, defiant, gone.
 
-    def score_candidate(story_text: str) -> int:
-        score = 0
-        low = story_text.lower()
-        # anchor
-        if first_ing and (first_ing.lower() in low or first_ing.rstrip("s").lower() in low):
-            score += 4
-        # archetype lexicon
-        lex_hits = 0
-        for tok_list in (arche_lex.get("motifs", []), arche_lex.get("adjs", []), arche_lex.get("verbs", [])):
-            for tok in tok_list:
-                if tok.lower() in low:
-                    lex_hits += 1
-        score += min(6, lex_hits * 2)  # up to +6
-        # moda ambience
-        moda_hits = sum(1 for t in moda_tokens if t.lower() in low)
-        score += min(3, moda_hits * 2)
-        # cadenza cue
-        cfg = CADENZA_CLOSURES.get(cadenza, {})
-        cadenza_kw = []
-        for t in cfg.get("templates", []):
-            cadenza_kw += re.findall(r"\b[a-zA-Z]{3,}\b", t)
-        if any(k.lower() in low for k in cadenza_kw[:4]):
-            score += 3
-        # prosody heuristics: measure sentence length pattern
-        sents = [s.strip() for s in SENT_RE.findall(story_text)]
-        if len(sents) == 2:
-            w1 = len(re.findall(r"\w+", sents[0]))
-            w2 = len(re.findall(r"\w+", sents[1]))
-            # prosody-specific preferences (simple heuristics)
-            p = prosody.lower()
-            if "maestoso" in p or "lento" in p or "adagio" in p:
-                if w1 >= 7 and w2 >= 7:
-                    score += 2
-            if "allegretto" in p or "vivace" in p:
-                if w1 >= 6 and w2 <= w1:
-                    score += 2
-            if "rubato" in p:
-                if abs(w1 - w2) >= 3:
-                    score += 2
-            if "staccato" in p or "presto" in p:
-                if w1 <= 6 and w2 <= 6:
-                    score += 2
-            # crescendo preference: second longer than first
-            if "crescendo" in cadenza.lower() and w2 > w1:
-                score += 2
-            # sfumato preference: closing words that feel like 'hush','dusk','linger'
-            if "sfumato" in cadenza.lower():
-                if any(x in low for x in ["hush", "fade", "linger", "dusk", "soft"]):
-                    score += 2
-        # small penalty if purely listy/menu-like (many commas and plain adjectives)
-        comma_count = low.count(",")
-        if comma_count > 3:
-            score -= 1
-        return score
+EXAMPLE 6:
+Recipe: Burnt Honey Panna Cotta with Lavender
+Prosody: Cantabile | Cadenza: Fermata | Moda: Nocturne | Archetype: Mystic
+→ Burnt honey pools in cream's pale dream, a slow amber hymn threaded with lavender's violet breath. Time suspends; the spoon rests, reluctant to break the spell.
+"""
 
-    # 1) produce candidates via LLM attempts
-    candidates = []
+    prompt = f"""You are a master Ricettario narrator crafting sensory micro-stories for culinary concoctions.
+
+CORE RULES:
+• Write EXACTLY 2 sentences, maximum 200 words total
+• MUST include "{first_ing}" as a sensory anchor (singular or plural form)
+• NEVER repeat or restate the recipe title in your opening
+• NO instructions, NO literal descriptions, NO menu language ("this dish", "the result")
+• Use symbolic, cinematic imagery with rhythm and motion
+• Channel archetype essence: {archetype} → {feel}
+
+PROSODY (rhythm/phrasing): {prosody}
+→ {prosody_guide}
+
+CADENZA (closing gesture): {cadenza}
+→ {cadenza_guide}
+
+MODA (emotional color): {moda}
+→ Use imagery that evokes this emotional atmosphere
+
+{few_shot_examples}
+
+NOW YOUR TURN:
+
+Recipe: {title}
+Key Ingredients: {first_ing}{(", " + second_ing) if second_ing else ""}
+Prosody: {prosody} | Cadenza: {cadenza} | Moda: {moda} | Archetype: {archetype}
+
+Write your 2-sentence sensory micro-story (≤200 words, plain text only):"""
+
     if use_llm and model is not None:
-        for i in range(n_candidates):
-            raw = gemini_text(model, prompt, tries=1, base_sleep=0.6)
+        # Try to get response from Gemini
+        for attempt in range(3):
+            raw = gemini_text(model, prompt, tries=1, base_sleep=1.0)
             if not raw:
                 continue
-            try:
-                # optional debug view while tuning
-                #st.text_area(f"raw_llm_{i+1}", raw, height=90)
-                pass
-            except Exception:
-                pass
-            story = extract_story_from_raw(raw)
-            story = _strip_repeated_title(title, story)
-            valid, reason = basic_validate(story)
-            sc = score_candidate(story) if valid else 0
-            candidates.append({"story": story, "raw": raw, "valid": valid, "reason": reason, "score": sc})
-
-            # small prompt tightening if invalid and more tries permitted
-            if (not valid) and i < n_candidates - 1:
-                prompt += "\n\nVALIDATION: previous output failed validation. RETURN JSON EXACTLY and follow constraints strictly."
-
-    # 2) choose best candidate if any
-    if candidates:
-        # prefer valid candidates, then highest score
-        valid_cands = [c for c in candidates if c["valid"]]
-        pool = valid_cands if valid_cands else candidates
-        best = max(pool, key=lambda c: c["score"])
-        # Accept if score above threshold or valid
-        if best["valid"] and best["score"] >= 6:
-            return best["story"]
-        if best["valid"] and best["score"] >= 4:
-            # minor accept; may still be good
-            return best["story"]
-
-    # 3) fallback deterministic composer (guaranteed prosody/cadenza enforcement)
-    fallback = _compose_from_template(title, ing, moda, prosody, cadenza, archetype, feel, rng_seed)
-    fallback = _strip_repeated_title(title, fallback)
-    # ensure anchor present
-    if first_ing and first_ing.lower() not in fallback.lower():
-        fallback = _ensure_anchor(fallback, first_ing)
-    return fallback
-
+            
+            # Clean up response - remove any JSON artifacts
+            story = raw.strip()
+            story = re.sub(r'^\s*\{.*?"story"\s*:\s*"', '', story)
+            story = re.sub(r'"\s*\}\s*$', '', story)
+            story = re.sub(r'^OUTPUT:\s*', '', story, flags=re.I)
+            story = re.sub(r'^→\s*', '', story)
+            
+            # Extract first 2-3 sentences
+            sents = SENT_RE.findall(story)
+            if sents and len(sents) >= 2:
+                story = " ".join(s.strip() for s in sents[:2])
+                story = _strip_repeated_title(title, story)
+                
+                # Basic validation
+                word_count = len(story.split())
+                has_anchor = (first_ing.lower() in story.lower() or 
+                             first_ing.rstrip('s').lower() in story.lower())
+                
+                if 15 <= word_count <= 60 and has_anchor and len(story) > 50:
+                    return story
+            
+            # If validation failed, try again with tighter prompt
+            if attempt < 2:
+                prompt += f"\n\nPREVIOUS ATTEMPT FAILED. Requirements: 2 sentences, include '{first_ing}', 15-50 words, no title repetition."
+    
+    # FALLBACK: Deterministic narratives by style combination
+    fallback_templates = {
+        # (Prosody, Cadenza, Moda): template
+        ("Allegretto", "Vivace", "Elixir"): (
+            f"{first_ing} swirls dark and bright, an invitation whispered through cream's velvet fold. "
+            f"The finish lifts—generous, convivial, leaving warmth on every tongue."
+        ),
+        ("Allegretto", "Vivace", "Tableau"): (
+            f"{first_ing} leaps into light, colors scattering like confetti across the plate. "
+            f"The finish sparkles—quick, joyful, already planning the next gathering."
+        ),
+        ("Allegretto", "Vivace", "Nocturne"): (
+            f"{first_ing} drifts through dusk-soft cream, a gentle invitation to linger. "
+            f"The close brightens unexpectedly—starlight breaking through evening's veil."
+        ),
+        ("Staccato", "Presto", "Tableau"): (
+            f"{first_ing} strikes. Sharp. Clean. Colors explode—a rebellion that refuses to wait."
+        ),
+        ("Cantabile", "Fermata", "Nocturne"): (
+            f"{first_ing} dissolves into cream like a lullaby sung to moonlight. "
+            f"Time suspends; the world softens into silence."
+        ),
+        ("Rubato", "Crescendo", "Symphony"): (
+            f"{first_ing} whispers at first, then deepens—gathering like a storm about to break. "
+            f"The finish swells, brass and bold, refusing to fade quietly."
+        ),
+        ("Maestoso", "Maestoso", "Virtuoso"): (
+            f"{first_ing} arrives with ceremony, each layer a declaration of patience and craft. "
+            f"The close is dignified, complete—a standing ovation frozen in cream."
+        ),
+        ("Lento", "Maestoso", "Elixir"): (
+            f"{first_ing} moves in measured devotion, each moment building quiet authority. "
+            f"The finish settles—grounded, dependable, complete."
+        ),
+        ("Scherzando", "Vivace", "Tableau"): (
+            f"{first_ing} tumbles playfully, a burst of color dancing across the palate. "
+            f"The finish leaps—bright mischief that leaves you grinning."
+        ),
+        ("Adagio", "Sfumato", "Nocturne"): (
+            f"{first_ing} unfolds slowly, a dream half-remembered in cream's tender embrace. "
+            f"The edges blur, dissolve... you're not sure where it ends."
+        ),
+    }
+    
+    # Try to find exact match
+    key = (prosody, cadenza, moda)
+    if key in fallback_templates:
+        return fallback_templates[key]
+    
+    # Prosody-based generic fallbacks
+    if prosody in ("Staccato", "Presto"):
+        return (f"{first_ing} strikes—sharp, unapologetic, a {moda.lower()} flash. "
+                f"Gone before you're ready, leaving only the echo of impact.")
+    
+    if prosody in ("Cantabile", "Adagio", "Murmure"):
+        return (f"{first_ing} unfolds like silk across water, unhurried, a {moda.lower()} reverie. "
+                f"The world softens at the edges, dissolves into {cadenza.lower()} stillness.")
+    
+    if prosody in ("Rubato", "Moderato", "Maestoso"):
+        return (f"In measured ceremony, {first_ing} moves with {prosody.lower()} grace and intention. "
+                f"The close gathers {moda.lower()} weight, a {cadenza.lower()} declaration that lingers.")
+    
+    if prosody in ("Allegretto", "Vivace", "Scherzando"):
+        return (f"{first_ing} dances in {prosody.lower()} rhythm, light and assured. "
+                f"It finishes with {cadenza.lower()} flourish—bright, unexpected, already inviting you back.")
+    
+    # Ultimate fallback
+    return (f"{first_ing} transforms in {moda.lower()} light, embodying the {archetype}'s essence. "
+            f"The {cadenza.lower()} finish leaves resonance, a story complete.")
 
 # =========================
 # Load recipes + embeddings
